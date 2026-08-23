@@ -1,112 +1,131 @@
 # PRAHARI
 
-**Behavioural boot attestation for Linux.** Detects a compromised boot even when
-every signature checks out.
+Catches a hacked boot even when every signature checks out fine.
 
-Built for C-DAC / MeitY *AI Enabled Operating System Hackathon 2026* —
-Track: AI Usage at OS & Kernel Level — Problem Statement:
-*AI-Assisted Secure Boot & Integrity Verification*.
+Built for the C-DAC / MeitY AI Enabled Operating System Hackathon 2026.
+Track: AI Usage at OS & Kernel Level.
+Problem: *AI-Assisted Secure Boot & Integrity Verification*.
 
----
+## Why we built it
 
-## The gap
+Right now, checking whether your machine booted safely works like a guest list.
+You keep a list of known-good file hashes. Every file that loads gets checked
+against the list. If it's on the list, it's fine. Keylime, the main open-source
+tool for this, works exactly this way.
 
-Existing attestation is **allowlist-based**. Keylime, the CNCF/IBM reference
-implementation, compares each measured file against a hand-maintained list of
-known-good hashes. It answers one question: *does this hash match?*
+The problem is that the good attacks don't break hashes.
 
-It cannot answer the other one: *is this boot sequence normal?*
+BlackLotus got past UEFI Secure Boot by bringing along real Microsoft-signed
+files that happened to have a bug in them. Every signature was genuine. Every
+hash was on the list. The machine got owned anyway. Bootkitty did the same
+thing to Ubuntu.
 
-That matters because the interesting attacks don't break hashes. BlackLotus
-bypassed UEFI Secure Boot by shipping its own **validly signed but vulnerable**
-binaries — signature verification passed and the machine was compromised anyway.
-Bootkitty did the same to Ubuntu via LogoFAIL. In both cases an allowlist checker
-sees nothing wrong, because nothing it looks at *is* wrong.
+A guest list can't catch that, because nothing on the list is wrong.
 
-PRAHARI learns what a normal boot looks like on this machine and flags boots that
-deviate — including boots where every component is individually legitimate.
+So we look at something else: the **order** things load in. Your machine boots
+the same way every time. If the same files show up in an order they've never
+shown up in before, something changed — even if every file is legitimate.
 
 ## How it works
 
-```
-IMA / TPM measurement log  ->  tokenizer  ->  baseline  ->  findings  ->  explanation
-                                                              |
-                                              hybrid ML-DSA + ECDSA manifest
-```
+The kernel already writes down every file it loads, in order, in a plain text
+file at `/sys/kernel/security/ima/ascii_runtime_measurements`. We read that.
 
-1. **Collect.** The kernel already records every file it measured, in order, at
-   `/sys/kernel/security/ima/ascii_runtime_measurements`. Plain text, append-only.
-2. **Tokenize.** Project each measurement onto two axes — *identity* (what was
-   loaded) and *content* (its hash). Allowlist checkers only ever compare content.
-3. **Learn.** A few clean boots give an n-gram model over identity sequences.
-4. **Check.** Three finding classes, in increasing order of what existing tools see:
+1. **Boot a few times normally.** That's our baseline — this is what normal
+   looks like on this machine.
+2. **Boot again, compare.** We flag three things:
 
-   | finding | meaning | allowlist checkers |
-   |---|---|---|
-   | `tampered` | known path, unseen hash | catch it |
-   | `unknown` | path in no baseline boot | catch it |
-   | `sequence` | legitimate components, impossible order | **miss it** |
+| What we found | What it means | Does a guest list catch it? |
+|---|---|---|
+| `tampered` | file we know, hash we don't | yes |
+| `unknown` | file that's never loaded before | yes |
+| `sequence` | normal files, weird order | **no** |
 
-5. **Sign.** The boot manifest is signed twice — ECDSA P-256 and ML-DSA-65
-   (FIPS 204), the RFC 9019 hybrid pattern. NSA CNSA 2.0 names firmware signing
-   the highest-priority use case for the post-quantum transition.
-6. **Explain.** The model narrates findings the detector already made. It never
-   decides whether a boot is compromised, so a hallucination can neither
-   manufacture nor suppress a detection.
+That last row is the whole point.
 
-## Quick start
+3. **Sign the result.** We sign the list of what loaded with two keys — a normal
+   one (ECDSA) and a quantum-safe one (ML-DSA-65). Both have to check out. This
+   is the pattern RFC 9019 recommends, and it's what the problem statement asks
+   for.
+4. **Explain it.** Claude writes up what we found in plain English. It only
+   describes findings we already made — it never decides anything itself, so it
+   can't invent a problem or hide one.
+
+## Try it
+
+You need a Linux VM. Not WSL2 — WSL2 has no TPM.
 
 ```bash
-sudo bash scripts/setup_ima.sh    # once; reboots into ima_policy=tcb
-sudo bash scripts/capture.sh      # after each reboot, 4-5 times
+sudo bash scripts/setup_ima.sh   # turn on measurement, then reboot
+sudo bash scripts/capture.sh     # run after each reboot, 4-5 times
 python -m prahari.cli learn boots/*.log
-python -m prahari.cli check boots/boot-latest.log
+python -m prahari.cli check boots/boot-latest.log --viz boot.html
 ```
 
-See the headline result:
+No VM handy? This makes fake boot logs so you can see it work right now:
 
 ```bash
+python scripts/synthesize.py 5
 python -m prahari.cli demo boots/*.log
 ```
 
-## Why n-grams and not an LSTM
+Which prints:
 
-DeepLog and LogBERT need thousands of sequences. You can reboot a machine maybe
-a dozen times before a deadline. An n-gram model over the identity sequence
-converges on a handful of boots and stays inspectable — every finding traces to
-a specific transition you can print. The LSTM path is wired but is the
-large-fleet story, not the single-machine one.
+```
+attack       allowlist    prahari      caught by
+tamper       DETECT       DETECT       tampered
+insert       DETECT       DETECT       sequence,unknown
+reorder      MISS         DETECT       sequence
+substitute   MISS         DETECT       sequence
+```
 
-## Requirements
+`substitute` is the BlackLotus one — we move a real, properly signed file to a
+point in the boot where it never normally appears. Its hash is fine. The guest
+list shrugs. We catch it.
 
-- Linux with `CONFIG_IMA` (Ubuntu Server ships it). **Not WSL2** — no TPM support.
-- OpenSSL 3.5+ for ML-DSA (`openssl list -signature-algorithms | grep ML-DSA`).
-- Python 3.9+. `ANTHROPIC_API_KEY` for narrative explanations (optional).
+## Why we didn't use a neural net
 
-A TPM is *not* required: IMA populates its log without one, so the whole system
-runs in a plain VM. With a TPM (or `swtpm` under QEMU/OVMF) the measured-boot
-log at `/sys/kernel/security/tpm0/ascii_bios_measurements` extends coverage back
-through firmware.
+DeepLog and LogBERT are the usual picks for this kind of thing, and they're
+good. But they want thousands of examples to learn from. You can reboot a
+laptop maybe ten times before a deadline.
 
-## Third-party components
+So we count sequences of three instead. It works after four or five boots, and
+every alert points at a specific transition you can print and read. Nothing is
+hidden inside weights. The neural net version is worth doing when you have a
+fleet of machines feeding you data — not for one laptop.
 
-| Component | Licence | Use |
+## What you need
+
+- Linux with `CONFIG_IMA` on (Ubuntu Server has it)
+- OpenSSL 3.5 or newer, for the quantum-safe signing
+- Python 3.9+
+- `ANTHROPIC_API_KEY` only if you want the written explanations
+
+You don't need a TPM chip. IMA still writes its log without one, which is why
+this runs in a plain VM. If you do have a TPM (or `swtpm` under QEMU), we can
+also read the firmware measurements and cover more of the boot.
+
+## What we used vs what we wrote
+
+Ours: the log parser, the tokenizer, the baseline model, the detector, and the
+attack generator.
+
+Borrowed:
+
+| Thing | Licence | What for |
 |---|---|---|
 | OpenSSL 3.5 | Apache-2.0 | ML-DSA-65 and ECDSA signing |
-| anthropic | MIT | explanation layer |
-| tpm2-tools / tpm2-pytss | BSD-3 / MIT | TPM event log (optional tier) |
+| plotly | MIT | the boot chart |
+| anthropic | MIT | writing up findings |
+| tpm2-tools | BSD-3 | reading TPM logs (optional) |
 
-The measurement parser, tokenizer, baseline model, detector and attack
-generator are original to this project.
+## Data
 
-## Datasets
-
-No public corpus of IMA or TPM measurement logs exists. The evaluation set is
-generated on the machine under test: N clean boots for the baseline, then four
-disclosed mutations for the attack class — `tamper`, `insert`, `reorder`,
-`substitute`. No personal data is collected; measurement logs contain file paths
-and hashes only.
+There's no public collection of boot logs anywhere, so we make our own. Boot a
+clean machine a few times for the baseline, then mess with those logs in four
+ways we document: `tamper`, `insert`, `reorder`, `substitute`. Boot logs only
+contain file paths and hashes — no personal data, nothing leaves the machine.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
