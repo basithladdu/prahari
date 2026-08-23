@@ -5,7 +5,6 @@ keys/
 bundle/
 baseline.json
 SSM-Guidelines.pdf
-docs/
 boot.html
 storage.html
 *.egg-info/
