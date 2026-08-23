@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+boots/
+keys/
+bundle/
+baseline.json
+SSM-Guidelines.pdf
+docs/
