@@ -9,3 +9,4 @@ docs/
 boot.html
 storage.html
 *.egg-info/
+docs/tui.svg

@@ -1,0 +1,23 @@
+[project]
+name = "prahari"
+version = "0.1.0"
+description = "Behavioural boot attestation for Linux"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["textual>=1.0"]
+
+[project.optional-dependencies]
+viz = ["plotly>=5.20"]
+ai = ["anthropic>=0.40"]
+all = ["plotly>=5.20", "anthropic>=0.40"]
+
+[project.scripts]
+prahari = "prahari.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["prahari*"]

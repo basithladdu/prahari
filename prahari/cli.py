@@ -94,6 +94,10 @@ def main(argv=None):
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=cmd_demo)
 
+    p = sub.add_parser("ui", help="open the terminal UI")
+    p.add_argument("logs", nargs="?", default="boots")
+    p.set_defaults(func=lambda a: __import__("prahari.tui", fromlist=["run"]).run(a.logs))
+
     p = sub.add_parser("sign", help="hybrid-sign a boot manifest")
     p.add_argument("log")
     p.add_argument("--keys", default="keys")

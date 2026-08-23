@@ -51,6 +51,22 @@ That last row is the whole point.
    describes findings we already made — it never decides anything itself, so it
    can't invent a problem or hide one.
 
+## The interface
+
+It's a terminal app, built on [Textual](https://github.com/Textualize/textual).
+Boot integrity gets checked on servers over ssh, so that's where the tool lives.
+
+```bash
+prahari ui boots/
+```
+
+![the terminal UI](docs/tui.png)
+
+The table is the boot in the order it happened, with anything that broke the
+baseline marked. The panel underneath runs all four attacks past both detectors,
+so you can see which ones an allowlist sleeps through. `a` shows only what was
+flagged, `f` goes back to the full sequence, `q` quits.
+
 ## Try it
 
 You need a Linux VM. Not WSL2 — WSL2 has no TPM.
