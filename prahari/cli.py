@@ -3,7 +3,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import detect, explain, inject, parse, pqc
+from . import detect, explain, inject, parse, pqc, viz
 
 BASELINE = Path("baseline.json")
 
@@ -23,7 +23,10 @@ def cmd_learn(args):
 
 def cmd_check(args):
     baseline = detect.Baseline.load(args.baseline)
-    findings = baseline.check(parse.read(args.log))
+    events = parse.read(args.log)
+    findings = baseline.check(events)
+    if args.viz:
+        print("timeline -> " + viz.timeline(events, findings, args.viz))
     if not findings:
         print("OK: boot matches baseline")
         return
@@ -83,6 +86,7 @@ def main(argv=None):
     p = sub.add_parser("check", help="compare one boot against the baseline")
     p.add_argument("log")
     p.add_argument("--baseline", default=BASELINE)
+    p.add_argument("--viz", metavar="OUT.html", help="draw the boot sequence")
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("demo", help="allowlist vs behavioural, all four attacks")
