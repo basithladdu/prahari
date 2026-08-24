@@ -1,6 +1,12 @@
 # PRAHARI
 
-Catches a hacked boot even when every signature checks out fine.
+[![CI](https://github.com/basithladdu/prahari/actions/workflows/ci.yml/badge.svg)](https://github.com/basithladdu/prahari/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python: 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
+[![Crypto: FIPS 204 ML-DSA-65](https://img.shields.io/badge/Crypto-ML--DSA--65%20(FIPS%20204)-10b981.svg)](https://csrc.nist.gov/pubs/fips/204/final)
+[![Compliance: DPDP Act 2023](https://img.shields.io/badge/Compliance-DPDP%20Act%202023-green.svg)](https://www.meity.gov.in/)
+
+Catches a compromised boot even when every signature checks out fine.
 
 Built for the C-DAC / MeitY AI Enabled Operating System Hackathon 2026.
 Track: AI Usage at OS & Kernel Level.
