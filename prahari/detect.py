@@ -72,7 +72,7 @@ class Baseline:
         for i, gram in enumerate(ngrams(seq, self.n)):
             if gram not in self.grams:
                 findings.append(Finding(
-                    "sequence", i, gram[-1],
+                    "sequence", i + self.n - 1, gram[-1],
                     "transition " + " -> ".join(gram) + " never occurred in baseline",
                     "medium"))
 
