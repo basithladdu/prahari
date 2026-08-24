@@ -24,7 +24,7 @@ def render(findings):
         for f in findings) or "- none"
 
 
-def explain(findings, boots, model="claude-sonnet-5"):
+def explain(findings, boots, model=None):
     if not findings:
         return "Boot matches the learned baseline. No anomalies."
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -32,12 +32,16 @@ def explain(findings, boots, model="claude-sonnet-5"):
 
     from anthropic import Anthropic
 
-    message = Anthropic().messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{
-            "role": "user",
-            "content": PROMPT.format(boots=boots, findings=render(findings)),
-        }],
-    )
-    return message.content[0].text
+    selected_model = model or os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+    try:
+        message = Anthropic().messages.create(
+            model=selected_model,
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": PROMPT.format(boots=boots, findings=render(findings)),
+            }],
+        )
+        return message.content[0].text
+    except Exception as e:
+        return f"[LLM explanation unavailable: {e}]\n\n" + render(findings)
