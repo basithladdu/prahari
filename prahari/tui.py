@@ -18,7 +18,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 from . import detect, inject, parse, tokens
 
 STATUS_STYLE = {
-    "ok": "dim",
+    "ok": "bold green",
     "sequence": "bold yellow",
     "unknown": "bold red",
     "tampered": "bold red",
@@ -48,21 +48,31 @@ class Prahari(App):
         width: 1fr; height: 7; padding: 1 2; margin-right: 1;
         border: round $primary 40%;
     }
+    #mode-bar { margin: 0 2; padding: 0 1; color: $accent; text-style: italic; }
     #table { margin: 1 2 0 2; height: 1fr; border: round $primary 30%; }
-    #compare { margin: 1 2; height: 12; border: round $primary 30%; padding: 0 2; }
+    #compare { margin: 1 2; height: 13; border: round $primary 30%; padding: 0 2; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
+        ("c", "sim_clean", "Clean Boot"),
+        ("t", "sim_tamper", "Tamper"),
+        ("i", "sim_insert", "Insert"),
+        ("r", "sim_reorder", "Reorder"),
+        ("s", "sim_substitute", "Substitute"),
         ("a", "only_flagged", "Flagged only"),
         ("f", "show_all", "Full sequence"),
     ]
     TITLE = "PRAHARI"
-    SUB_TITLE = " boot integrity"
+    SUB_TITLE = " Behavioural Boot Attestation & Sequence Anomaly Detector"
 
     def __init__(self, logs="boots"):
         super().__init__()
         self.logs = Path(logs)
         self.events, self.marks, self.flagged_only = [], {}, False
+        self.sim_mode = "substitute"
+        self.base = None
+        self.clean_boot = None
+        self.comparison = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -71,6 +81,7 @@ class Prahari(App):
             yield Stat("this boot")
             yield Stat("flagged")
             yield Stat("verdict")
+        yield Static("Active Simulation: substitute", id="mode-bar")
         yield DataTable(id="table", zebra_stripes=True, cursor_type="row")
         yield Static(id="compare")
         yield Footer()
@@ -78,9 +89,9 @@ class Prahari(App):
     def on_mount(self):
         t = self.query_one(DataTable)
         t.add_column("#", width=6)
-        t.add_column("Status", width=11)
+        t.add_column("Status", width=12)
         t.add_column("Measurement")
-        t.add_column("Why", width=44)
+        t.add_column("Why / Transition Detail", width=48)
         self.analyse()
 
     @work(thread=True)
@@ -90,49 +101,62 @@ class Prahari(App):
             self.call_from_thread(self.fail, f"need 2+ logs in {self.logs}/")
             return
         boots = [parse.read(f) for f in files]
-        base = detect.Baseline(3)
+        self.base = detect.Baseline(3)
         for b in boots[:-1]:
-            base.learn(b)
-        # show the holdout boot under the substitution attack: the case where
-        # every hash is valid and only the ordering gives it away
-        events, _ = inject.apply(boots[-1], "substitute", 0)
-        findings = base.check(events)
+            self.base.learn(b)
+        self.clean_boot = boots[-1]
 
-        table = []
+        self.comparison = []
         for name in inject.ATTACKS:
-            attacked, _ = inject.apply(boots[-1], name, 0)
-            kinds = {f.kind for f in base.check(attacked)}
-            table.append((name, bool(kinds & {"tampered", "unknown"}), bool(kinds)))
+            attacked, _ = inject.apply(self.clean_boot, name, 0)
+            kinds = {f.kind for f in self.base.check(attacked)}
+            self.comparison.append((name, bool(kinds & {"tampered", "unknown"}), bool(kinds)))
 
-        self.call_from_thread(self.show, base, events, findings, table)
+        self.call_from_thread(self.apply_mode, self.sim_mode)
 
     def fail(self, msg):
         self.query_one("#compare", Static).update(Text(msg, style="bold red"))
 
-    def show(self, base, events, findings, comparison):
+    def apply_mode(self, mode):
+        self.sim_mode = mode
+        if mode == "clean":
+            events = self.clean_boot
+            mode_desc = "CLEAN BOOT (Unmodified holdout sequence)"
+        else:
+            events, _ = inject.apply(self.clean_boot, mode, 0)
+            mode_desc = f"{mode.upper()} ATTACK ({'Hash intact, anomalous order' if mode in ('reorder','substitute') else 'Hash corrupted or new token'})"
+
+        findings = self.base.check(events)
         self.events = events
         self.marks = {}
         for f in findings:
             if f.kind != "sequence" or f.position not in self.marks:
                 self.marks[f.position] = f
 
+        self.query_one("#mode-bar", Static).update(
+            Text.assemble(("Simulation: ", "dim"), (mode_desc, "bold cyan")))
+
         s = self.query(Stat)
-        s[0].set(f"{base.boots} boots", f"{len(base.grams):,} known transitions")
+        s[0].set(f"{self.base.boots} boots", f"{len(self.base.grams):,} known transitions")
         s[1].set(f"{len(events):,} events", "measured in order")
-        s[2].set(f"{len(self.marks)}", "off baseline")
+        s[2].set(f"{len(self.marks)}", "off baseline", style="bold red" if self.marks else "bold green")
         ok = not self.marks
-        s[3].set("TRUSTED" if ok else "ANOMALOUS", "signatures all valid",
+        s[3].set("TRUSTED" if ok else "ANOMALOUS",
+                 "baseline matched" if ok else ("hash valid, order broken" if mode in ("reorder", "substitute") else "signature/hash failed"),
                  style="bold green" if ok else "bold red")
 
         rows = []
-        for name, allowlist, ours in comparison:
+        for name, allowlist, ours in self.comparison:
+            is_active = (name == self.sim_mode)
+            prefix = "▶ " if is_active else "  "
+            style_name = "bold cyan" if is_active else "bold"
             rows.append(Text.assemble(
-                (f"  {name:<14}", "bold"),
+                (f"{prefix}{name:<14}", style_name),
                 (f"{'DETECT' if allowlist else 'MISS':<12}",
                  "green" if allowlist else "bold red"),
                 ("DETECT" if ours else "MISS", "green" if ours else "bold red")))
         header = Text.assemble(
-            ("\n  same four attacks, both detectors\n\n", "dim italic"),
+            ("\n  same four attacks, both detectors (keys: [c]lean [t]amper [i]nsert [r]eorder [s]ubstitute)\n\n", "dim italic"),
             ("  attack        allowlist   behavioural\n", "dim"))
         self.query_one("#compare", Static).update(
             Text("\n").join([header] + rows))
@@ -149,9 +173,24 @@ class Prahari(App):
             kind = f.kind if f else "ok"
             t.add_row(
                 Text(str(i), justify="right", style="dim"),
-                Text(kind, style=STATUS_STYLE[kind]),
-                Text(label, style="dim" if not f else ""),
-                Text(f.detail[:44] if f else "", style="dim"))
+                Text(kind.upper(), style=STATUS_STYLE[kind]),
+                Text(label, style="bold" if f else "dim"),
+                Text(f.detail[:48] if f else "matches baseline transition", style="dim" if not f else "bold yellow"))
+
+    def action_sim_clean(self):
+        if self.base: self.apply_mode("clean")
+
+    def action_sim_tamper(self):
+        if self.base: self.apply_mode("tamper")
+
+    def action_sim_insert(self):
+        if self.base: self.apply_mode("insert")
+
+    def action_sim_reorder(self):
+        if self.base: self.apply_mode("reorder")
+
+    def action_sim_substitute(self):
+        if self.base: self.apply_mode("substitute")
 
     def action_only_flagged(self):
         self.flagged_only = True
@@ -164,3 +203,4 @@ class Prahari(App):
 
 def run(logs="boots"):
     Prahari(logs).run()
+
