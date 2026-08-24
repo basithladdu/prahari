@@ -9,7 +9,14 @@ BASELINE = Path("baseline.json")
 
 
 def _load(paths):
-    return [parse.read(p) for p in paths]
+    expanded = []
+    for p in paths:
+        path = Path(p)
+        if path.is_dir():
+            expanded.extend(sorted(path.glob("*.log")))
+        else:
+            expanded.append(path)
+    return [parse.read(p) for p in expanded]
 
 
 def cmd_learn(args):

@@ -29,16 +29,27 @@ def digest(events):
     return hashlib.sha256(manifest(events)).hexdigest()
 
 
+def _openssl_bin():
+    exe = shutil.which("openssl")
+    if exe:
+        return exe
+    for fallback in [r"C:\Program Files\Git\usr\bin\openssl.exe", "/usr/bin/openssl", "/usr/local/bin/openssl"]:
+        if Path(fallback).is_file():
+            return fallback
+    return "openssl"
+
+
 def _openssl(*args, **kwargs):
-    return subprocess.run(["openssl", *args], check=True, capture_output=True, **kwargs)
+    return subprocess.run([_openssl_bin(), *args], check=True, capture_output=True, **kwargs)
 
 
 def supports_pq():
-    if not shutil.which("openssl"):
+    try:
+        out = subprocess.run([_openssl_bin(), "list", "-signature-algorithms"],
+                             capture_output=True, text=True)
+        return "ML-DSA" in out.stdout
+    except Exception:
         return False
-    out = subprocess.run(["openssl", "list", "-signature-algorithms"],
-                         capture_output=True, text=True)
-    return "ML-DSA" in out.stdout
 
 
 def keygen(outdir):
@@ -60,23 +71,41 @@ def sign(events, keydir, out):
     keydir, out = Path(keydir), Path(out)
     payload = manifest(events)
     out.mkdir(parents=True, exist_ok=True)
+    manifest_file = str(out / "manifest.json")
     (out / "manifest.json").write_bytes(payload)
-    for name, key in (("classical", "classical.key"), ("pq", "pq.key")):
-        _openssl("dgst", "-sha256", "-sign", str(keydir / key),
-                 "-out", str(out / f"{name}.sig"), str(out / "manifest.json"))
+    
+    # ECDSA P-256 (requires hash algorithm)
+    _openssl("dgst", "-sha256", "-sign", str(keydir / "classical.key"),
+             "-out", str(out / "classical.sig"), manifest_file)
+    
+    # ML-DSA-65 (pure post-quantum signature, no external hash flag)
+    _openssl("dgst", "-sign", str(keydir / "pq.key"),
+             "-out", str(out / "pq.sig"), manifest_file)
     return out
 
 
 def verify(bundle, keydir):
     """Both signatures must validate. Either failing rejects the manifest."""
     bundle, keydir = Path(bundle), Path(keydir)
+    manifest_file = str(bundle / "manifest.json")
     results = {}
-    for name, key in (("classical", "classical.key"), ("pq", "pq.key")):
-        pub = bundle / f"{name}.pub"
-        _openssl("pkey", "-in", str(keydir / key), "-pubout", "-out", str(pub))
-        proc = subprocess.run(
-            ["openssl", "dgst", "-sha256", "-verify", str(pub),
-             "-signature", str(bundle / f"{name}.sig"), str(bundle / "manifest.json")],
-            capture_output=True)
-        results[name] = proc.returncode == 0
+    
+    # Classical verification
+    pub_c = bundle / "classical.pub"
+    _openssl("pkey", "-in", str(keydir / "classical.key"), "-pubout", "-out", str(pub_c))
+    proc_c = subprocess.run(
+        [_openssl_bin(), "dgst", "-sha256", "-verify", str(pub_c),
+         "-signature", str(bundle / "classical.sig"), manifest_file],
+        capture_output=True)
+    results["classical"] = (proc_c.returncode == 0)
+    
+    # PQ verification
+    pub_pq = bundle / "pq.pub"
+    _openssl("pkey", "-in", str(keydir / "pq.key"), "-pubout", "-out", str(pub_pq))
+    proc_pq = subprocess.run(
+        [_openssl_bin(), "dgst", "-verify", str(pub_pq),
+         "-signature", str(bundle / "pq.sig"), manifest_file],
+        capture_output=True)
+    results["pq"] = (proc_pq.returncode == 0)
+    
     return results
