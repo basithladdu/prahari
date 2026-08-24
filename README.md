@@ -62,10 +62,22 @@ prahari ui boots/
 
 ![the terminal UI](docs/tui.png)
 
-The table is the boot in the order it happened, with anything that broke the
-baseline marked. The panel underneath runs all four attacks past both detectors,
-so you can see which ones an allowlist sleeps through. `a` shows only what was
-flagged, `f` goes back to the full sequence, `q` quits.
+The table displays every measurement in the order it occurred, with anomalies clearly highlighted. The bottom panel continuously benchmarks all four attack vectors against both detectors.
+
+### Interactive Live Demo Controls
+* `c` → **Clean Boot** (Unmodified holdout sequence)
+* `t` → **Tamper** (Direct hash corruption)
+* `i` → **Insert** (Rogue injected kernel module)
+* `r` → **Reorder** (Permuted valid events — hash matches, order fails)
+* `s` → **Substitute** (Relocated signed binary — BlackLotus vector)
+* `a` → **Flagged Only** toggle
+* `f` → **Full Sequence** view
+* `q` → **Quit**
+
+You can also generate an interactive HTML visualizer with timeline swimlanes, KPI cards, and event inspector:
+```bash
+python -m prahari.cli check boots/boot-0.log --viz boot.html
+```
 
 ## Try it
 
