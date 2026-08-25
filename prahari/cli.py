@@ -3,7 +3,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import detect, explain, inject, parse, pqc, viz
+from . import attest, benchmark, detect, explain, inject, parse, pqc, stages, viz
 
 BASELINE = Path("baseline.json")
 
@@ -32,15 +32,57 @@ def cmd_check(args):
     baseline = detect.Baseline.load(args.baseline)
     events = parse.read(args.log)
     findings = baseline.check(events)
+    
+    if args.json:
+        import json
+        evidence = attest.generate_evidence(events, baseline, findings)
+        print(json.dumps(evidence, indent=2))
+        return
+
     if args.viz:
         print("timeline -> " + viz.timeline(events, findings, args.viz))
     if not findings:
-        print("OK: boot matches baseline")
+        print("OK: boot matches baseline (Risk: 0.0, Trust: CLEAN)")
         return
     for f in findings:
-        print(f"[{f.severity:6}] {f.kind:9} {f.path}\n           {f.detail}")
+        stage = stages.classify_path(f.path).value
+        print(f"[{f.severity.upper():8}] [{stage:<16}] {f.kind:9} {f.path}\n           {f.detail}")
     print()
     print(explain.explain(findings, baseline.boots))
+
+
+def cmd_attest(args):
+    """Generate standardized IETF RATS (RFC 9334) JSON Evidence Claim."""
+    import json
+    baseline = detect.Baseline.load(args.baseline)
+    events = parse.read(args.log)
+    findings = baseline.check(events)
+    evidence = attest.generate_evidence(events, baseline, findings)
+    
+    out_path = Path(args.out)
+    out_path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+    print(f"IETF RATS Evidence generated -> {out_path} [Rating: {evidence['behavioral_attestation']['trust_rating']}]")
+
+
+def cmd_benchmark(args):
+    """Execute automated empirical ROC evaluation across all attack vectors."""
+    boots = _load(args.logs)
+    report = benchmark.run_benchmark(boots, seed=args.seed)
+    
+    print(f"=========================================================================")
+    print(f"PRAHARI EMPIRICAL BENCHMARK (Train Boots: {report['baseline_boots']} | Holdout Events: {report['holdout_events']})")
+    print(f"=========================================================================\n")
+    print(f"{'SCENARIO':<32} {'EXPECTED':<10} {'ALLOWLIST':<12} {'PRAHARI':<12} {'LATENCY'}")
+    print("-" * 74)
+    
+    for r in report["scenarios"]:
+        al_str = "DETECT" if r["allowlist_caught"] else "PASS"
+        pr_str = "DETECT" if r["prahari_caught"] else "PASS"
+        print(f"{r['scenario']:<32} {r['expected']:<10} {al_str:<12} {pr_str:<12} {r['latency_ms']} ms")
+        
+    print("-" * 74)
+    print(f"Allowlist Accuracy: {report['summary']['allowlist_accuracy'] * 100:.1f}%")
+    print(f"PRAHARI Accuracy:   {report['summary']['prahari_accuracy'] * 100:.1f}%\n")
 
 
 def cmd_demo(args):
@@ -94,7 +136,19 @@ def main(argv=None):
     p.add_argument("log")
     p.add_argument("--baseline", default=BASELINE)
     p.add_argument("--viz", metavar="OUT.html", help="draw the boot sequence")
+    p.add_argument("--json", action="store_true", help="output standardized JSON attestation claim")
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("attest", help="generate standardized IETF RATS JSON Evidence Claim")
+    p.add_argument("log")
+    p.add_argument("--baseline", default=BASELINE)
+    p.add_argument("--out", default="evidence.json")
+    p.set_defaults(func=cmd_attest)
+
+    p = sub.add_parser("bench", help="run empirical benchmark across attack vectors")
+    p.add_argument("logs", nargs="+")
+    p.add_argument("--seed", type=int, default=42)
+    p.set_defaults(func=cmd_benchmark)
 
     p = sub.add_parser("demo", help="allowlist vs behavioural, all four attacks")
     p.add_argument("logs", nargs="+")

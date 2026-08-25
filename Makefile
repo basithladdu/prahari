@@ -1,4 +1,4 @@
-.PHONY: all test demo check learn ui clean
+.PHONY: all test demo bench attest check learn ui clean
 
 all: test demo
 
@@ -7,6 +7,12 @@ test:
 
 demo:
 	python -m prahari.cli demo boots/
+
+bench:
+	python -m prahari.cli bench boots/
+
+attest:
+	python -m prahari.cli attest boots/boot-0.log --out evidence.json
 
 learn:
 	python -m prahari.cli learn boots/
@@ -18,4 +24,4 @@ ui:
 	python -m prahari.cli ui boots/
 
 clean:
-	rm -rf __pycache__ prahari/__pycache__ tests/__pycache__ .pytest_cache *.egg-info build dist
+	rm -rf __pycache__ prahari/__pycache__ tests/__pycache__ .pytest_cache *.egg-info build dist evidence.json

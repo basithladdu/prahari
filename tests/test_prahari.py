@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from prahari import detect, inject, parse, pqc, tokens
+from prahari import attest, benchmark, detect, inject, parse, pqc, stages, tokens
 
 
 class TestPrahari(unittest.TestCase):
@@ -67,6 +67,28 @@ class TestPrahari(unittest.TestCase):
         self.assertIn('sequence', kinds)
         self.assertNotIn('tampered', kinds)
 
+    def test_boot_stage_classification(self):
+        self.assertEqual(stages.classify_path("boot_aggregate"), stages.BootStage.FIRMWARE_UEFI)
+        self.assertEqual(stages.classify_path("/boot/vmlinuz-linux"), stages.BootStage.KERNEL_CORE)
+        self.assertEqual(stages.classify_path("/init"), stages.BootStage.EARLY_USERSPACE)
+        self.assertEqual(stages.classify_path("/bin/systemd"), stages.BootStage.INIT_SYSTEM)
+        self.assertEqual(stages.classify_path("/lib/modules/test.ko"), stages.BootStage.KERNEL_MODULES)
+
+    def test_attestation_evidence_generation(self):
+        base = detect.Baseline(n=3).learn(self.boot_a)
+        findings = base.check(self.boot_a)
+        evidence = attest.generate_evidence(self.boot_a, base, findings)
+        self.assertEqual(evidence["rats_header"]["type"], "IETF_RATS_EVIDENCE_RFC9334")
+        self.assertEqual(evidence["behavioral_attestation"]["trust_rating"], "CLEAN")
+        self.assertEqual(evidence["behavioral_attestation"]["overall_anomaly_score"], 0.0)
+
+    def test_benchmark_runner(self):
+        boots = [self.boot_a, self.boot_b, self.boot_a]
+        report = benchmark.run_benchmark(boots, seed=0)
+        self.assertEqual(report["baseline_boots"], 2)
+        self.assertIn("scenarios", report)
+        self.assertGreaterEqual(report["summary"]["prahari_accuracy"], 0.8)
+
     def test_pqc_manifest_and_signatures(self):
         if not pqc.supports_pq():
             self.skipTest('ML-DSA OpenSSL support not available in environment')
@@ -78,6 +100,7 @@ class TestPrahari(unittest.TestCase):
             results = pqc.verify(bundledir, keydir)
             self.assertTrue(results.get('classical'))
             self.assertTrue(results.get('pq'))
+
 
 if __name__ == '__main__':
     unittest.main()

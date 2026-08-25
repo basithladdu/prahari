@@ -117,6 +117,20 @@ substitute   MISS         DETECT       sequence
 point in the boot where it never normally appears. Its hash is fine. The guest
 list shrugs. We catch it.
 
+### Standard IETF RATS (RFC 9334) JSON Evidence Export
+
+Export cryptographically verifiable attestation evidence claims:
+```bash
+python -m prahari.cli attest boots/boot-0.log --out evidence.json
+```
+
+### Empirical Benchmark & Accuracy Engine
+
+Run full ROC benchmark suite across clean holdouts and all attack vectors:
+```bash
+python -m prahari.cli bench boots/
+```
+
 ## Why we didn't use a neural net
 
 DeepLog and LogBERT are the usual picks for this kind of thing, and they're
