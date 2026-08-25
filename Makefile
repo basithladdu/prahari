@@ -1,6 +1,9 @@
-.PHONY: all test demo bench attest check learn ui clean
+.PHONY: all test demo bench attest audit check learn ui clean
 
 all: test demo
+
+audit:
+	python scripts/daemon_audit.py
 
 test:
 	python -m unittest discover tests
