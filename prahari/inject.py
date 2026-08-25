@@ -31,10 +31,14 @@ def insert(events, rng):
 
 
 def reorder(events, rng):
-    """Same components, two of them swapped."""
-    i = rng.randrange(1, len(events) - 1)
+    """Same components, permuting execution order across steps."""
+    if len(events) < 4:
+        i, j = 0, len(events) - 1
+    else:
+        i = rng.randrange(1, len(events) - 3)
+        j = i + rng.randrange(2, min(5, len(events) - i))
     out = list(events)
-    out[i], out[i + 1] = out[i + 1], out[i]
+    out[i], out[j] = out[j], out[i]
     return out, i
 
 
