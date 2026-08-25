@@ -1,11 +1,6 @@
-"""The interface.
+"""The interactive terminal interface for PRAHARI.
 
-The claim of this project is that boot integrity lives in the order of events,
-so the screen shows the order: every measurement the kernel made, in sequence,
-with the ones that broke the baseline marked. Underneath, the same four attacks
-run past both detectors so you can see which ones an allowlist sleeps through.
-
-Built on Textual.
+Built on Textual — live attack simulation hotkeys, execution stage tracking, and dual detector comparison.
 """
 from pathlib import Path
 
@@ -15,13 +10,23 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import DataTable, Footer, Header, Static
 
-from . import detect, inject, parse, tokens
+from . import detect, inject, parse, stages, tokens
 
 STATUS_STYLE = {
     "ok": "bold green",
     "sequence": "bold yellow",
     "unknown": "bold red",
     "tampered": "bold red",
+}
+
+STAGE_STYLE = {
+    stages.BootStage.FIRMWARE_UEFI: "magenta",
+    stages.BootStage.KERNEL_CORE: "bold purple",
+    stages.BootStage.EARLY_USERSPACE: "bold cyan",
+    stages.BootStage.INIT_SYSTEM: "blue",
+    stages.BootStage.KERNEL_MODULES: "bold pink",
+    stages.BootStage.SYSTEM_SERVICES: "green",
+    stages.BootStage.UNKNOWN: "dim",
 }
 
 
@@ -88,8 +93,9 @@ class Prahari(App):
 
     def on_mount(self):
         t = self.query_one(DataTable)
-        t.add_column("#", width=6)
-        t.add_column("Status", width=12)
+        t.add_column("#", width=5)
+        t.add_column("Status", width=11)
+        t.add_column("Boot Stage", width=18)
         t.add_column("Measurement")
         t.add_column("Why / Transition Detail", width=48)
         self.analyse()
@@ -171,9 +177,11 @@ class Prahari(App):
             if self.flagged_only and not f:
                 continue
             kind = f.kind if f else "ok"
+            stage_enum = stages.classify_path(label)
             t.add_row(
                 Text(str(i), justify="right", style="dim"),
                 Text(kind.upper(), style=STATUS_STYLE[kind]),
+                Text(stage_enum.value, style=STAGE_STYLE.get(stage_enum, "dim")),
                 Text(label, style="bold" if f else "dim"),
                 Text(f.detail[:48] if f else "matches baseline transition", style="dim" if not f else "bold yellow"))
 
@@ -203,4 +211,3 @@ class Prahari(App):
 
 def run(logs="boots"):
     Prahari(logs).run()
-

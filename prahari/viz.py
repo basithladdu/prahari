@@ -1,23 +1,25 @@
-"""Draw the boot as an interactive security dashboard with findings and sequence analysis.
-
-The core premise of PRAHARI is that boot integrity is a property of the
-*order* of events, not of any single hash. The dashboard renders:
-1. Summary KPIs (Total measurements, Flagged violations, PQC status)
-2. Interactive Boot Sequence Timeline (Plotly)
-3. 4-Vector Attack Benchmark Comparison Matrix (Allowlist vs PRAHARI)
-4. Detailed Transition & Measurement Inspector
-"""
+"""Draw the boot as an interactive security dashboard with findings, stages, and sequence analysis."""
 import json
 from pathlib import Path
 import plotly.graph_objects as go
 
-from . import inject, tokens
+from . import stages, tokens
 
 COLOURS = {
     "ok": "#10b981",         # emerald-500
     "sequence": "#f59e0b",   # amber-500
     "unknown": "#ef4444",    # rose-500
     "tampered": "#dc2626"    # red-600
+}
+
+STAGE_COLORS = {
+    stages.BootStage.FIRMWARE_UEFI: "#6366f1",     # Indigo
+    stages.BootStage.KERNEL_CORE: "#8b5cf6",       # Violet
+    stages.BootStage.EARLY_USERSPACE: "#06b6d4",   # Cyan
+    stages.BootStage.INIT_SYSTEM: "#3b82f6",       # Blue
+    stages.BootStage.KERNEL_MODULES: "#ec4899",    # Pink
+    stages.BootStage.SYSTEM_SERVICES: "#10b981",   # Emerald
+    stages.BootStage.UNKNOWN: "#64748b",           # Slate
 }
 
 DASHBOARD_TEMPLATE = """<!DOCTYPE html>
@@ -48,7 +50,7 @@ body {{
   padding: 32px 20px;
 }}
 .container {{
-  max-width: 1240px;
+  max-width: 1280px;
   margin: 0 auto;
 }}
 header {{
@@ -76,6 +78,16 @@ header {{
   border-radius: 9999px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}}
+.badge-rats {{
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
 }}
 .header-meta {{
   color: var(--text-muted);
@@ -134,14 +146,6 @@ header {{
   padding: 12px;
   border: 1px solid #1f293d;
 }}
-.table-grid {{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}}
-@media (max-width: 860px) {{
-  .table-grid {{ grid-template-columns: 1fr; }}
-}}
 table {{
   width: 100%;
   border-collapse: collapse;
@@ -173,6 +177,7 @@ td {{
 .pill-unknown {{ background: rgba(239, 68, 68, 0.2); color: #fca5a5; }}
 .pill-sequence {{ background: rgba(245, 158, 11, 0.2); color: #fcd34d; }}
 .pill-ok {{ background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }}
+.pill-stage {{ background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 11px; }}
 .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }}
 .search-input {{
   background: #0d131f;
@@ -190,7 +195,7 @@ td {{
 <div class="container">
   <header>
     <div class="logo-group">
-      <h1>🛡️ PRAHARI <span class="badge-pqc">ECDSA P-256 + ML-DSA-65 (FIPS 204)</span></h1>
+      <h1>🛡️ PRAHARI <span class="badge-pqc">ECDSA P-256 + ML-DSA-65 (FIPS 204)</span> <span class="badge-rats">IETF RATS RFC 9334</span></h1>
     </div>
     <div class="header-meta">Behavioural Boot Attestation & Sequence Anomaly Detector</div>
   </header>
@@ -199,7 +204,7 @@ td {{
     <div class="kpi-card">
       <div class="kpi-label">Total Measurements</div>
       <div class="kpi-val">{total_events}</div>
-      <div class="kpi-sub">Kernel & Firmware IMA Events</div>
+      <div class="kpi-sub">{observed_stages_count} Boot Stages Monitored</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Flagged Anomalies</div>
@@ -209,12 +214,12 @@ td {{
     <div class="kpi-card">
       <div class="kpi-label">Attestation Verdict</div>
       <div class="kpi-val" style="color: {verdict_color};">{verdict_text}</div>
-      <div class="kpi-sub">Dual Cryptographic + N-Gram Check</div>
+      <div class="kpi-sub">Risk Score: {risk_score} / 1.0</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Post-Quantum Status</div>
       <div class="kpi-val" style="color: #34d399;">PROTECTED</div>
-      <div class="kpi-sub">Quantum-Resistant Hybrid Chain</div>
+      <div class="kpi-sub">FIPS 204 ML-DSA-65 Signature</div>
     </div>
   </div>
 
@@ -228,7 +233,7 @@ td {{
 
   <div class="panel">
     <div class="panel-title">4-Vector Threat Benchmark (Allowlist vs PRAHARI)</div>
-    <div class="panel-desc">Comparison demonstrating how traditional allowlists miss reordering and substitution attacks where hashes remain intact.</div>
+    <div class="panel-desc">Demonstrating how traditional allowlists miss reordering and substitution attacks where hashes remain intact.</div>
     <table>
       <thead>
         <tr>
@@ -274,13 +279,14 @@ td {{
 
   <div class="panel">
     <div class="panel-title">Boot Event Log & Anomaly Inspector</div>
-    <div class="panel-desc">Filter and inspect individual measurements, paths, hashes, and sequence transition checks.</div>
-    <input type="text" id="filterInput" class="search-input" placeholder="Search paths, events, or severity..." onkeyup="filterTable()">
+    <div class="panel-desc">Filter and inspect individual measurements, execution stages, paths, hashes, and transition checks.</div>
+    <input type="text" id="filterInput" class="search-input" placeholder="Search paths, stages, events, or severity..." onkeyup="filterTable()">
     <table id="eventsTable">
       <thead>
         <tr>
           <th style="width: 50px;">#</th>
           <th style="width: 100px;">Status</th>
+          <th style="width: 140px;">Boot Stage</th>
           <th>Measurement Identity (Path)</th>
           <th>Detail / Violated Transition</th>
         </tr>
@@ -331,7 +337,7 @@ def timeline(events, findings=(), out="boot.html"):
                 line=dict(width=1, color="#ffffff" if kind != "ok" else "#10b981")
             ),
             line=dict(color="rgba(148, 163, 184, 0.3)", width=1),
-            text=[f"<b>#{i} {labels[i]}</b>" + (f"<br><span style='color:{COLOURS[kind]};'>{marks[i].detail}</span>" if i in marks else "<br>Status: Baseline OK")
+            text=[f"<b>#{i} {labels[i]}</b><br>Stage: {stages.classify_path(labels[i]).value}" + (f"<br><span style='color:{COLOURS[kind]};'>{marks[i].detail}</span>" if i in marks else "<br>Status: Baseline OK")
                   for i in idx],
             hoverinfo="text"
         ))
@@ -352,16 +358,21 @@ def timeline(events, findings=(), out="boot.html"):
 
     # Generate table rows
     table_rows = []
+    observed_stages = set()
     for i, e in enumerate(events):
         f = marks.get(i)
         kind = f.kind if f else "ok"
         pill_cls = f"pill pill-{kind}"
         status_label = kind.upper()
+        stage_obj = stages.classify_path(e.path)
+        observed_stages.add(stage_obj.value)
+        stage_label = stage_obj.value
         detail = f.detail if f else "Matches clean boot sequence n-gram transition"
         table_rows.append(f"""
         <tr>
           <td class="mono">{i}</td>
           <td><span class="{pill_cls}">{status_label}</span></td>
+          <td><span class="pill pill-stage">{stage_label}</span></td>
           <td class="mono">{tokens.identity(e)}</td>
           <td style="color: {'#fcd34d' if kind=='sequence' else ('#fca5a5' if kind in ('tampered','unknown') else 'var(--text-muted)')};">{detail}</td>
         </tr>
@@ -372,18 +383,20 @@ def timeline(events, findings=(), out="boot.html"):
     verdict_color = "#ef4444" if flagged_count > 0 else "#10b981"
     flagged_color = "#f59e0b" if flagged_count > 0 else "#10b981"
     verdict_sub = f"{flagged_count} abnormal transitions" if flagged_count > 0 else "0 anomalies detected"
+    risk_score = round(min(1.0, flagged_count * 0.35 + (0.3 if any(f.kind in ('tampered','unknown') for f in findings) else 0)), 2)
 
     full_html = DASHBOARD_TEMPLATE.format(
         total_events=len(events),
+        observed_stages_count=len(observed_stages),
         flagged_count=flagged_count,
         flagged_color=flagged_color,
         verdict_text=verdict_text,
         verdict_color=verdict_color,
         verdict_sub=verdict_sub,
+        risk_score=risk_score,
         plotly_div=plotly_div,
         table_rows="\n".join(table_rows)
     )
 
     Path(out).write_text(full_html, encoding="utf-8")
     return out
-
