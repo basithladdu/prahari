@@ -47,6 +47,8 @@ class Baseline:
         self.boots = 0
 
     def learn(self, events):
+        if not events:
+            raise ValueError("cannot learn from an empty measurement stream")
         seq = tokens.sequence(events)
         for event in events:
             self.hashes[tokens.identity(event)].add(tokens.content(event))
@@ -55,6 +57,8 @@ class Baseline:
         return self
 
     def check(self, events):
+        if not events:
+            raise ValueError("cannot check an empty measurement stream")
         seq = tokens.sequence(events)
         findings = []
 

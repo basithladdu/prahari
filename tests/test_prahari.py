@@ -28,6 +28,20 @@ class TestPrahari(unittest.TestCase):
         self.assertEqual(ident, '/init')
         self.assertEqual(content, 'sha256:2222')
 
+    def test_measurement_parsing_fails_closed(self):
+        valid = '10 template-hash ima-ng sha256:abcd /usr/bin/example'
+        self.assertEqual(parse.parse(valid + '\n\n')[0].path, '/usr/bin/example')
+        with self.assertRaisesRegex(parse.MeasurementParseError, 'line 2'):
+            parse.parse(valid + '\ntruncated measurement')
+        with self.assertRaisesRegex(parse.MeasurementParseError, 'no IMA events'):
+            parse.parse('\n')
+
+        with self.assertRaisesRegex(ValueError, 'empty measurement stream'):
+            detect.Baseline(n=3).learn([])
+        base = detect.Baseline(n=3).learn(self.boot_a)
+        with self.assertRaisesRegex(ValueError, 'empty measurement stream'):
+            base.check([])
+
     def test_baseline_learning_and_clean_check(self):
         base = detect.Baseline(n=3)
         base.learn(self.boot_a)

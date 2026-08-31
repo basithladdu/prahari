@@ -24,16 +24,36 @@ class Event:
     path: str
 
 
+class MeasurementParseError(ValueError):
+    """The measurement log is empty or contains an invalid record."""
+
+
 def parse(text):
     events = []
-    for line in text.splitlines():
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
         parts = line.split(maxsplit=4)
         if len(parts) < 5:
-            continue
+            raise MeasurementParseError(
+                f"invalid IMA measurement at line {line_number}: expected 5 fields")
         pcr, template_hash, template, digest, path = parts
+        try:
+            pcr = int(pcr)
+        except ValueError as exc:
+            raise MeasurementParseError(
+                f"invalid IMA measurement at line {line_number}: PCR must be an integer") from exc
+
         # ima-ng and ima-sig prefix the digest with its algorithm; plain ima does not
         file_hash = digest.split(":", 1)[-1]
-        events.append(Event(int(pcr), template_hash, template, file_hash, path.strip()))
+        path = path.strip()
+        if not file_hash or not path:
+            raise MeasurementParseError(
+                f"invalid IMA measurement at line {line_number}: hash and path are required")
+        events.append(Event(pcr, template_hash, template, file_hash, path))
+
+    if not events:
+        raise MeasurementParseError("measurement log contains no IMA events")
     return events
 
 
